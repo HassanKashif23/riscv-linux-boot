@@ -10,9 +10,9 @@ The project utilizes QEMU to emulate the virt machine, providing a virtual RISC-
 
 Installation:
 
-sudo apt-get update
-sudo apt-get install qemu-system
-qemu-system-riscv64 --version
+sudo apt-get update\
+sudo apt-get install qemu-system\
+qemu-system-riscv64 --version\
 
 Initial Verification:
 
