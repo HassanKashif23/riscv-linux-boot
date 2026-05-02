@@ -1,0 +1,165 @@
+RISC-V Full-Stack Linux Development Guide
+
+1. Environment Setup & Hardware Emulation
+The first step is to simulate the RISC-V hardware using QEMU. We use the virt machine, which provides a generic platform with a virtual CPU, RAM, and essential peripherals like a UART for console output.
+    
+To setup qemu:
+
+sudo apt-get update
+sudo apt-get install qemu-system
+qemu-system-riscv64 --version
+
+Run this command to initialize the SoC hardware:
+
+qemu-system-riscv64 -M virt -m 256M -nographic -bios none
+
+A "hang" appears which is actually success. It proves that QEMU has successfully allocated the 256MB of RAM and started the RISC-V CPU. Since we used -bios none, the CPU is sitting at the reset vector (the starting memory address) with no instructions to execute, so it is just spinning in an empty loop.
+
+To terminate the qemu process or turn off the virtual machine
+ctrl + A then X
+
+2. Installing Cross Compiler
+We need a cross compiler when we are compiling for a an architecture different than the architecture we are working on.
+Like we would be cross compiling for RISC-V from AMD/INTEL architecture.
+to install the cross compiler
+sudo apt install gcc-riscv64-linux-gnu
+riscv64-linux-gnu-gcc --version
+
+3. Firmware Layer: OpenSBI
+OpenSBI (Supervisor Binary Interface) acts as the "BIOS" for the RISC-V architecture. It handles hardware initialization in Machine-mode (M-mode) before handing control to the kernel.
+We will clone the official source code and compile it specifically for the virt machine we emulated earlier.
+
+git clone https://github.com/riscv-software-src/opensbi.git
+cd opensbi
+
+We use CROSS_COMPILE to tell the system to use the RISC-V toolchain you just installed.
+
+make PLATFORM=generic CROSS_COMPILE=riscv64-linux-gnu-
+
+Once finished, "BIOS" binary will be created here:
+build/platform/generic/firmware/fw_jump.bin
+
+Now run this command to initialize the RISCV SoC but this time you will see the OpenSBI logo and initialization text in your terminal.
+qemu-system-riscv64 -M virt -m 256M -nographic -bios build/platform/generic/firmware/fw_jump.bin
+
+4. The Kernel Layer: Custom Linux Build
+We compile a 64-bit Linux kernel specifically for our emulated RISC-V SoC
+First, get the "blueprints" for the operating system.
+cd ~
+git clone --depth 1 https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+cd linux
+
+We must tell the Linux code to build itself for a 64-bit RISC-V processor, not your laptop's processor.
+make ARCH=riscv CROSS_COMPILE=riscv64-linux-gnu- defconfig
+
+for installing missing packages if needed
+sudo apt update
+sudo apt install flex bison libssl-dev libelf-dev
+sudo apt install libncurses-dev
+
+Compile the Kernel, Once the configuration is written, start the build. This turns the code into a binary file that the SoC can actually run.
+make ARCH=riscv CROSS_COMPILE=riscv64-linux-gnu- -j$(nproc)
+
+The output file is arch/riscv/boot/Image
+
+The compiler is currently turning the C source code into RISC-V instructions. It is setting up how the OS will manage memory (MMU), schedule processes, and communicate with the UART emulated in QEMU.
+
+5. The Filesystem Layer: BusyBox
+The Root Filesystem (RootFS) provides the shell and utilities. BusyBox is used to combine multiple UNIX utilities into a single static binary for efficiency.
+Run these commands to get the source code, BusyBox, is the "gold standard" for learning SoC design because it is the simplest way to get a functional environment.
+
+cd ~
+git clone https://git.busybox.net/busybox
+cd busybox
+
+or if it doesnt work
+
+cd ~
+wget https://busybox.net/downloads/busybox-1.36.1.tar.bz2
+tar -xjf busybox-1.36.1.tar.bz2
+cd busybox-1.36.1
+
+Build busybox
+make ARCH=riscv CROSS_COMPILER=riscv64-linux-gnu- menuconfig
+make ARCH=riscv CROSS_COMPILE=riscv64-linux-gnu- -j$(nproc)
+make ARCH=riscv CROSS_COMPILE=riscv64-linux-gnu- install
+
+Linux requires specific folders to manage devices and processes.
+
+cd _install
+mkdir -p dev etc proc sys tmp var res root
+mkdir -p etc/init.d
+
+The kernel looks for an init file to start the user-space session.
+Create and authorize the init script
+
+nano etc/init.d/rcS
+copy paste the below script and save
+
+#!/bin/sh
+mount -t proc none /proc
+mount -t sysfs none /sys
+/sbin/mdev -s
+echo "Welcome to RISC-V Linux!"
+
+make it executable
+chmod +x etc/init.d/rcS
+ln -sf bin/busybox init
+sudo mknod -m 666 dev/null c 1 3
+sudo mknod -m 666 dev/console c 5 1
+
+create user application to run on riscv SoC in C, which is given
+nano hello.c
+
+Cross compile it for RISCV
+riscv64-linux-gnu-gcc -static hello.c -o hello
+
+copy this file into bin folder inside busybox
+cp ~/hello ~/busybox-1.36.1/_install/bin/
+cd ~/busybox-1.36.1/_install
+
+Zip up everything into a package
+find . | cpio -o -H newc | gzip > ../rootfs.img.gz
+
+6. Final execution and driver development/testing
+
+Initial Boot: Run QEMU with the Image and rootfs.img.gz.
+
+qemu-system-riscv64 -M virt -m 256M -nographic \
+    -bios ~/opensbi/build/platform/generic/firmware/fw_jump.bin \
+    -kernel ~/linux/arch/riscv/boot/Image \
+    -initrd ~/busybox-1.36.1/rootfs.img.gz \
+    -append "root=/dev/ram rdinit=/init console=ttyS0"
+   
+after running, the c file output will be displayed on the console
+
+Now we will write a custom timer driver to handle external interrupts
+create a folder
+mkdir riscv_driver
+cd riscv_driver
+
+write/add the timer_driver.c and its makefile here and compile them: 
+make
+make ARCH=riscv CROSS_COMPILE=riscv64-linux-gnu-
+
+copy the resulted timer_driver.ko file into busybox install folder
+cp ~/riscv_driver/timer_driver.ko ~/busybox-1.36.1/_install/
+
+go to busybox install folder and rezip the package
+cd ~/busybox-1.36.1/_install
+find . | cpio -o -H newc | gzip > ../rootfs.img.gz
+
+Run QEMU with the updated Image and rootfs.img.gz
+
+qemu-system-riscv64 -M virt -m 256M -nographic \
+    -bios ~/opensbi/build/platform/generic/firmware/fw_jump.bin \
+    -kernel ~/linux/arch/riscv/boot/Image \
+    -initrd ~/busybox-1.36.1/rootfs.img.gz \
+    -append "root=/dev/ram rdinit=/init console=ttyS0"
+    
+Hello.c would be executed and the terminal would ask to press enter to activate console
+press enter and type the below command to load the timer driver
+insmod timer_driver.ko
+
+Now the timer driver will be initiated and will keep printing the message that timer interrupt is being handled.
+We have successfully booted the Custom linux kernel onto a QEMU Emulated RISCV!
