@@ -16,17 +16,18 @@ qemu-system-riscv64 --version\
 
 Initial Verification:
 
-qemu-system-riscv64 -M virt -m 256M -nographic -bios none
+qemu-system-riscv64 -M virt -m 256M -nographic -bios none\
+
 Note: A "hang" at this stage indicates successful memory allocation and CPU startup, stalled at the reset vector without instructions.
 
 ### 2. Toolchain & Firmware Layer
 Cross-compilation is essential for developing RISC-V software on x86/AMD64 architectures.
 
-Cross-Compiler: sudo apt install gcc-riscv64-linux-gnu.
+Cross-Compiler: sudo apt install gcc-riscv64-linux-gnu\
 
 OpenSBI: Acts as the "BIOS," handling hardware initialization in M-mode.
 
-Build Command: make PLATFORM=generic CROSS_COMPILE=riscv64-linux-gnu-.
+Build Command: make PLATFORM=generic CROSS_COMPILE=riscv64-linux-gnu-\
 
 Binary: fw_jump.bin.
 
@@ -35,9 +36,9 @@ A 64-bit Linux kernel was cross-compiled and configured for the virt platform.
 
 Source: Upstream Linux Stable.
 
-Configuration: make ARCH=riscv CROSS_COMPILE=riscv64-linux-gnu- defconfig.
+Configuration: make ARCH=riscv CROSS_COMPILE=riscv64-linux-gnu- defconfig\
 
-Compilation: make ARCH=riscv CROSS_COMPILE=riscv64-linux-gnu- -j$(nproc).
+Compilation: make ARCH=riscv CROSS_COMPILE=riscv64-linux-gnu- -j$(nproc)\
 
 Output: arch/riscv/boot/Image.
 
@@ -52,7 +53,7 @@ Init Script (rcS): Automates mounting of virtual filesystems and starts the shel
 Device Nodes: Manual creation of /dev/null and /dev/console using mknod to ensure stable I/O.
 Packaging:
 
-find . | cpio -o -H newc | gzip > ../rootfs.img.gz
+find . | cpio -o -H newc | gzip > ../rootfs.img.gz\
 
 ### 5. Kernel-Space Innovation: Timer Driver
 To demonstrate hardware-software interaction, a custom Loadable Kernel Module (LKM) was developed to handle timer interrupts.
